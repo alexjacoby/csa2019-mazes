@@ -1,4 +1,5 @@
 import java.awt.Color;
+import java.awt.event.KeyEvent;
 import java.io.File;
 import java.io.IOException;
 import java.util.Scanner;
@@ -17,8 +18,21 @@ import java.util.Scanner;
  *   ***.*
  *   ....E
  * </pre>
- * TODO HW 3.16: Implement isSolvable(row, col).
- * TODO Challenge: Draw or print directions to solve the maze.
+ * TODO HW 3.17: drawShortestPath(): Use the distances array (provided, or you can
+ * erase mine and try it yourself) to figure out the shortest path from START to
+ * EXIT (*).  You should either draw arrows or a special color to show the path
+ * visually.  If multiple shortest paths exist, any of them is fine.
+ * 
+ * (*) Theoretically a maze could have multiple STARTs or EXITs -- just use the
+ *  first one you find.
+ *  
+ * Suggested algorithm: Starting at START, choose the neighbor with the smallest
+ * distance from exit.  Continue recursively until you reach the exit.
+ * 
+ * Issues: Our current isSolvable replaces START with a BREADCRUMB, so you'll have
+ * to save the START position another way.
+ * 
+ * There's another issue I thought of but it escapes me now :P
  * 
  * @author Mr. Jacoby
  * @version 3/11/19
@@ -33,22 +47,31 @@ public class SimpleMaze {
   public static final char START = 'S';
   /** End of maze. */
   public static final char EXIT = 'E';
-  /** Room we've already visited while searching for exit (was previously EMPTY). */
-  public static final char BREADCRUMB = 'b';
   
   /** In randomly generated maze, what percent of the rooms should be walls. */
-  public static final double PERCENT_WALLS = 0.25; // Note: should be configurable at runtime
+  public static final double PERCENT_WALLS = 0.25;
   
   // FIELDS
   /**
-   * "rooms" in maze must have one of the values listed above: EMPTY, WALL, START
-   * EXIT, or BREADCRUMB.
+   * "rooms" in maze must have one of the values listed above: EMPTY, WALL, START, or
+   * EXIT.
    */
   private final char[][] rooms;
-  
+
+  /**
+   * Tracks which rooms have been visited.
+   */
+  private final boolean[][] visited;
+
+  /**
+   * Tracks shortest path to exit from corresponding room (-1 means no path possible).
+   * Initialized in initDistances().
+   */
+  private final int[][] distances;
+
   // CONSTRUCTORS
-  /** Creates new random maze with given dimensions. */
-  public SimpleMaze(int rows, int cols) {
+  /** Creates new random maze with given dimensions and percent walls. */
+  public SimpleMaze(int rows, int cols, double percentWalls) {
     rooms = new char[rows][cols];
     // Fill all rooms as empty
     for (int r = 0; r < rooms.length; r++) {
@@ -59,7 +82,7 @@ public class SimpleMaze {
     // Randomly add some walls
     for (int r = 0; r < rooms.length; r++) {
       for (int c = 0; c < rooms[0].length; c++) {
-        if (Math.random() < PERCENT_WALLS) {
+        if (Math.random() < percentWalls) {
           rooms[r][c] = WALL;
         }
       }
@@ -67,8 +90,11 @@ public class SimpleMaze {
     // Add start and exit
     rooms[getRows()-1][0] = START; // bottom left
     rooms[0][getCols()-1] = EXIT; // top right
+    
+    visited = new boolean[getRows()][getCols()];
+    distances = initDistances();
   } // end SimpleMaze(rows, cols)
-  
+
   /** Loads maze from given text file. */
   public SimpleMaze(String filename) throws IOException {
     Scanner in = new Scanner(new File(filename));
@@ -86,12 +112,30 @@ public class SimpleMaze {
     }
     // TODO: throw IllegalStateException if no START or EXIT found?
     in.close();
-    
     // Note: For a more robust, cleaner solution, check out:
     // Succinct: https://www.baeldung.com/java-try-with-resources
     // Official: https://docs.oracle.com/javase/tutorial/essential/exceptions/tryResourceClose.html
     // Comprehensive: https://dzone.com/articles/java-code-bytes-be-resourceful-with-try-with-resou
+
+    visited = new boolean[getRows()][getCols()];
+    distances = initDistances();
   } // end SimpleMaze(filename)
+
+  /**
+   * Returns initialized distances array: all spots are 0 except walls, which are -1.
+   * Rooms array must already be initialized.
+   */
+  private int[][] initDistances() {
+    int[][] distances = new int[getRows()][getCols()];
+    for (int row = 0; row < getRows(); row++) {
+      for (int col = 0; col < getCols(); col++) {
+        if (rooms[row][col] == WALL) {
+          distances[row][col] = -1;
+        }
+      }
+    }
+    return distances;
+  }
 
   public int getRows() {
     return rooms.length;
@@ -111,13 +155,30 @@ public class SimpleMaze {
     if (row < 0 || row >= getRows() || col < 0 || col >= getCols()) { return false; }
     
     char room = rooms[row][col];
-    if (room == WALL || room == BREADCRUMB) { return false; }
+    if (room == WALL || visited[row][col]) { return false; }
     if (room == EXIT) { return true; }
-    rooms[row][col] = BREADCRUMB;
+    visited[row][col] = true;
     
     // Recursively search for solution up, right, down, and left
+    if (isSolvable(row-1, col)) {
+      System.out.println("UP!");
+      return true;
+    } else if (isSolvable(row, col+1)) {
+      System.out.println("RIGHT!");
+      return true;
+    } else if (isSolvable(row+1, col)) {
+      System.out.println("DOWN!");
+      return true;
+    } else if (isSolvable(row, col-1)) {
+      System.out.println("LEFT!");
+      return true;
+    } else {
+      return false;
+    }
+    /*
     return isSolvable(row-1, col) || isSolvable(row, col+1) ||
-          isSolvable(row+1, col) || isSolvable(row, col-1);
+           isSolvable(row+1, col) || isSolvable(row, col-1);
+           */
   }
   
   /**
@@ -131,18 +192,74 @@ public class SimpleMaze {
     for (int r = 0; r < getRows(); r++) {
       for (int c = 0; c < getCols(); c++) {
         if (rooms[r][c] == START) {
-          if (isSolvable(r, c)) { return true; }
+          if (isSolvable(r, c)) {
+            return true;
+          }
         }
       }
     }
     return false;
   }
-  
+
+  /**
+   * Figures out the shortest distance from each room to the exit.  Stores
+   * results in distances field.
+   */
+  public void updateDistances() {
+    // Searches through rooms, looking for an EXIT.  If found, will updated
+    // distances array with each room's distance from that exit.
+    for (int row = 0; row < getRows(); row++) {
+      for (int col = 0; col < getCols(); col++) {
+        if (rooms[row][col] == EXIT) {
+          updateDistances(row-1, col, 1); // up
+          updateDistances(row, col+1, 1); // right
+          updateDistances(row+1, col, 1); // down
+          updateDistances(row, col-1, 1); // left
+        }
+      }
+    }
+    // Now make unreachable rooms distance -1
+    for (int row = 0; row < getRows(); row++) {
+      for (int col = 0; col < getCols(); col++) {
+        if (rooms[row][col] != EXIT && distances[row][col] == 0) {
+          distances[row][col] = -1;
+        }
+      }
+    }
+  }
+
+  /**
+   * If row/col is a valid room with current distance not set or greater
+   * than given distance, set its distance to the given one and update its
+   * four neighbors recursively with given distance + 1.
+   */
+  private void updateDistances(int row, int col, int dist) {
+    // Return if location invalid
+    if (row < 0 || row >= getRows() || col < 0 || col >= getCols()) { return; }
+
+    char room = rooms[row][col];
+    if (room == EXIT) { return; } // distance stays 0
+    if (room == WALL) { distances[row][col] = -1; return; }
+    
+    // If distance currently 0 or greater than dist, update dist, then update neighbors
+    if (distances[row][col] == 0 || distances[row][col] > dist) {
+      distances[row][col] = dist;
+      updateDistances(row-1, col, dist+1); // up
+      updateDistances(row, col+1, dist+1); // right
+      updateDistances(row+1, col, dist+1); // down
+      updateDistances(row, col-1, dist+1); // left
+    }
+  }
+
   /** Prints maze to System.out for debugging. */
   public void print() {
-    for (char[] row : rooms) {
-      for (char r : row) {
-        System.out.print(r);
+    for (int r = 0; r < rooms.length; r++) {
+      for (int c = 0; c < rooms.length; c++) {
+        char room = rooms[r][c];
+        if (room != START && visited[r][c]) {
+          room = 'o';
+        }
+        System.out.print(room);
       }
       System.out.println();
     }
@@ -162,12 +279,17 @@ public class SimpleMaze {
           case WALL: color = Color.BLUE; break;
           case START: color = Color.MAGENTA; break;
           case EXIT: color = Color.RED; break;
-          case BREADCRUMB: color = Color.GREEN; break;
           default:
             throw new IllegalStateException("Unexpected room type: " + rooms[r][c]);
         }
         window.setPenColor(color);
         window.filledRectangle(xCtr, yCtr, 0.5, 0.5);
+        if (visited[r][c]) {
+          window.setPenColor(Color.GREEN);
+          window.filledCircle(xCtr, yCtr, 0.25);
+        }
+        window.setPenColor();
+        window.text(xCtr, yCtr, "" + distances[r][c]);
       }
     }
   } // draw(window)
@@ -181,14 +303,35 @@ public class SimpleMaze {
     System.out.println("Random maze...");
     int rows = (args.length > 0) ? Integer.parseInt(args[0]) : 10;
     int cols = (args.length > 1) ? Integer.parseInt(args[1]) : 10;
-    SimpleMaze randomMaze = new SimpleMaze(rows, cols);
-    Draw randomMazeWindow = new Draw("Random Maze: " + rows + "x" + cols);
-    // randomMaze.print();  // uncomment to debug
+    double percentWalls = (args.length >2)? Double.parseDouble(args[2]) : PERCENT_WALLS;
+    SimpleMaze randomMaze = new SimpleMaze(rows, cols, percentWalls);
+    Draw randomMazeWindow = new Draw(String.format("Random Maze: %dx%d %2.0f%%",rows, cols,
+          (percentWalls*100)));
+    randomMaze.print();  // uncomment to debug
     System.out.println("Solvable? " + randomMaze.isSolvable());
+    randomMaze.updateDistances();
     randomMaze.draw(randomMazeWindow);
     
+    // Generate a new random maze every time they window is clicked.
+    // Stop if they type "q".
+    while (true) {
+      if (randomMazeWindow.isMousePressed()) {
+        randomMazeWindow.clear();
+        randomMaze = new SimpleMaze(rows, cols, percentWalls);
+        System.out.println("Solvable? " + randomMaze.isSolvable());
+        randomMaze.updateDistances();
+        randomMaze.draw(randomMazeWindow);
+        randomMazeWindow.pause(500); // long pause so click isn't registered multiple times
+      } else if (randomMazeWindow.isKeyPressed(KeyEvent.VK_Q)) {
+        break;
+      } else {
+        randomMazeWindow.pause(100); // short pause so we don't hog the CPU
+      }
+    }
+    
     // Mazes from files
-    String[] filenames = {"maze0.txt", "maze1.txt", "maze2.txt"};
+    String[] filenames = {}; // Don't load files
+    // String[] filenames = {"maze0.txt", "maze1.txt", "maze2.txt"};
     // Note: maze0 and maze1 are solvable, maze2 is not.
     for (String filename : filenames) {
       System.out.println("Loading: " + filename);
