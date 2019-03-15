@@ -2,6 +2,9 @@ import java.awt.Color;
 import java.awt.event.KeyEvent;
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Scanner;
 
 /**
@@ -35,7 +38,7 @@ import java.util.Scanner;
  * There's another issue I thought of but it escapes me now :P
  * 
  * @author Mr. Jacoby
- * @version 3/11/19
+ * @version 3/14/19
  */
 public class SimpleMaze {
   // CONSTANTS
@@ -53,6 +56,11 @@ public class SimpleMaze {
   
   // FIELDS
   /**
+   * Draw window for displaying maze.
+   */
+  private final Draw window;
+  
+  /**
    * "rooms" in maze must have one of the values listed above: EMPTY, WALL, START, or
    * EXIT.
    */
@@ -61,18 +69,24 @@ public class SimpleMaze {
   /**
    * Tracks which rooms have been visited.
    */
-  private final boolean[][] visited;
+  private boolean[][] visited;
 
   /**
    * Tracks shortest path to exit from corresponding room (-1 means no path possible).
    * Initialized in initDistances().
    */
-  private final int[][] distances;
+  private int[][] distances;
 
   // CONSTRUCTORS
   /** Creates new random maze with given dimensions and percent walls. */
   public SimpleMaze(int rows, int cols, double percentWalls) {
+    window = new Draw(String.format("Random Maze: %dx%d %2.0f%%", rows, cols,
+          (percentWalls*100)));
     rooms = new char[rows][cols];
+    makeRandomMaze(percentWalls);
+  } // end SimpleMaze(rows, cols)
+
+  private void makeRandomMaze(double percentWalls) {
     // Fill all rooms as empty
     for (int r = 0; r < rooms.length; r++) {
       for (int c = 0; c < rooms[0].length; c++) {
@@ -91,15 +105,17 @@ public class SimpleMaze {
     rooms[getRows()-1][0] = START; // bottom left
     rooms[0][getCols()-1] = EXIT; // top right
     
+    // Initialize visited and distances
     visited = new boolean[getRows()][getCols()];
-    distances = initDistances();
-  } // end SimpleMaze(rows, cols)
+    distances = new int[getRows()][getCols()];
+  } // makeRandomMaze(percentWalls)
 
   /** Loads maze from given text file. */
   public SimpleMaze(String filename) throws IOException {
     Scanner in = new Scanner(new File(filename));
     int rows = in.nextInt();
     int cols = in.nextInt();
+    window = new Draw(filename + ": " + rows + "x" + cols);
     in.nextLine();
     rooms = new char[rows][cols];
     int row = 0;
@@ -117,25 +133,9 @@ public class SimpleMaze {
     // Official: https://docs.oracle.com/javase/tutorial/essential/exceptions/tryResourceClose.html
     // Comprehensive: https://dzone.com/articles/java-code-bytes-be-resourceful-with-try-with-resou
 
-    visited = new boolean[getRows()][getCols()];
-    distances = initDistances();
+    visited = new boolean[rows][cols];
+    distances = new int[rows][cols];
   } // end SimpleMaze(filename)
-
-  /**
-   * Returns initialized distances array: all spots are 0 except walls, which are -1.
-   * Rooms array must already be initialized.
-   */
-  private int[][] initDistances() {
-    int[][] distances = new int[getRows()][getCols()];
-    for (int row = 0; row < getRows(); row++) {
-      for (int col = 0; col < getCols(); col++) {
-        if (rooms[row][col] == WALL) {
-          distances[row][col] = -1;
-        }
-      }
-    }
-    return distances;
-  }
 
   public int getRows() {
     return rooms.length;
@@ -149,6 +149,9 @@ public class SimpleMaze {
    * Returns true if maze can be solved from given position in the maze.
    * Note: Given position is not guaranteed to be valid (if invalid, isSolvable()
    * must return false).
+   * Note: Method is made superfluous by updateDistances, since maze is only
+   * solvable if distance from START is >= 0.  Method kept as example of
+   * simpler solution, though it doesn't lead to shortest path.
    */
   public boolean isSolvable(int row, int col) {
     // Return false if location invalid
@@ -160,25 +163,8 @@ public class SimpleMaze {
     visited[row][col] = true;
     
     // Recursively search for solution up, right, down, and left
-    if (isSolvable(row-1, col)) {
-      System.out.println("UP!");
-      return true;
-    } else if (isSolvable(row, col+1)) {
-      System.out.println("RIGHT!");
-      return true;
-    } else if (isSolvable(row+1, col)) {
-      System.out.println("DOWN!");
-      return true;
-    } else if (isSolvable(row, col-1)) {
-      System.out.println("LEFT!");
-      return true;
-    } else {
-      return false;
-    }
-    /*
     return isSolvable(row-1, col) || isSolvable(row, col+1) ||
            isSolvable(row+1, col) || isSolvable(row, col-1);
-           */
   }
   
   /**
@@ -251,6 +237,83 @@ public class SimpleMaze {
     }
   }
 
+  /**
+   * Returns list of directions from the start to the exit, or empty list if
+   * not solvable from start.
+   */
+  public List<Direction> getShortestPath() {
+    // Find start
+    int startRow = 0, startCol = 0;
+    for (int r = 0; r < rooms.length; r++) {
+      for (int c = 0; c < rooms[r].length; c++) {
+        if (rooms[r][c] == START) {
+          startRow = r;
+          startCol = c;
+          if (distances[r][c] == 0) { // Distances not yet updated - START != EXIT
+            updateDistances();
+          }
+          if (distances[r][c] == -1) {
+            return Collections.emptyList();
+          }
+          List<Direction> path = new ArrayList<>(distances[r][c]);
+          while (rooms[r][c] != EXIT) {
+            Direction dir = findDirToMinNeighbor(r, c);
+            path.add(dir);
+            switch (dir) {
+              case UP:    r--; break;
+              case RIGHT: c++; break;
+              case DOWN:  r++; break;
+              case LEFT:  c--; break;
+            }
+          }
+          drawPath(startRow, startCol, path);
+          return path;
+        }
+      }
+    }
+    return Collections.emptyList();
+  } // getShortestPath
+
+  /** Returns direction neighbor with shortest path to exit. */
+  private Direction findDirToMinNeighbor(int row, int col) {
+    int min = Integer.MAX_VALUE;
+    Direction minDir = Direction.UP;
+    // UP
+    if (row > 0) {
+      int dist = distances[row-1][col];
+      if (dist >= 0) {
+        min = dist;
+        minDir = Direction.UP;
+      }
+    }
+    // RIGHT
+    if (col < getCols()-1) {
+      int dist = distances[row][col+1];
+      if (dist >= 0 && dist < min) {
+        min = dist;
+        minDir = Direction.RIGHT;
+      }
+    }
+    // DOWN
+    if (row < getRows()-1) {
+      int dist = distances[row+1][col];
+      if (dist >= 0 && dist < min) {
+        min = dist;
+        minDir = Direction.DOWN;
+      }
+    }
+    // LEFT
+    if (col > 0) {
+      int dist = distances[row][col-1];
+      if (dist >= 0 && dist < min) {
+        min = dist;
+        minDir = Direction.LEFT;
+      }
+    }
+    
+    return minDir;
+  } // end findDirToMinNeighbor
+
   /** Prints maze to System.out for debugging. */
   public void print() {
     for (int r = 0; r < rooms.length; r++) {
@@ -265,8 +328,9 @@ public class SimpleMaze {
     }
   }
 
-  /** Draws maze to given window. */
-  public void draw(Draw window) {
+  /** Draws maze to its window. */
+  public void draw() {
+    window.clear();
     window.setYscale(getRows(), 0);
     window.setXscale(0, getCols());
     for (int r = 0; r < getRows(); r++) {
@@ -292,7 +356,26 @@ public class SimpleMaze {
         window.text(xCtr, yCtr, "" + distances[r][c]);
       }
     }
-  } // draw(window)
+  } // draw()
+
+  /**
+   * Draws given path from given starting point (with small magenta dots).
+   */
+  private void drawPath(int startRow, int startCol, List<Direction> path) {
+    int r = startRow, c = startCol;
+    window.setPenColor(Color.MAGENTA);
+    for (Direction dir : path) {
+      double xCtr = c + 0.5;
+      double yCtr = r + 0.5;
+      window.filledCircle(xCtr, yCtr, 0.1);
+      switch (dir) {
+        case UP:    r--; break;
+        case RIGHT: c++; break;
+        case DOWN:  r++; break;
+        case LEFT:  c--; break;
+      }
+    }
+  }
 
   /**
    * Creates random maze of given dimensions (defaults to 10x10),
@@ -305,41 +388,39 @@ public class SimpleMaze {
     int cols = (args.length > 1) ? Integer.parseInt(args[1]) : 10;
     double percentWalls = (args.length >2)? Double.parseDouble(args[2]) : PERCENT_WALLS;
     SimpleMaze randomMaze = new SimpleMaze(rows, cols, percentWalls);
-    Draw randomMazeWindow = new Draw(String.format("Random Maze: %dx%d %2.0f%%",rows, cols,
-          (percentWalls*100)));
     randomMaze.print();  // uncomment to debug
     System.out.println("Solvable? " + randomMaze.isSolvable());
     randomMaze.updateDistances();
-    randomMaze.draw(randomMazeWindow);
+    randomMaze.draw();
+    System.out.println("Shortest path: " + randomMaze.getShortestPath());
     
     // Generate a new random maze every time they window is clicked.
     // Stop if they type "q".
     while (true) {
-      if (randomMazeWindow.isMousePressed()) {
-        randomMazeWindow.clear();
-        randomMaze = new SimpleMaze(rows, cols, percentWalls);
+      if (randomMaze.window.isMousePressed()) {
+        randomMaze.makeRandomMaze(percentWalls);
         System.out.println("Solvable? " + randomMaze.isSolvable());
-        randomMaze.updateDistances();
-        randomMaze.draw(randomMazeWindow);
-        randomMazeWindow.pause(500); // long pause so click isn't registered multiple times
-      } else if (randomMazeWindow.isKeyPressed(KeyEvent.VK_Q)) {
+        randomMaze.draw();
+        System.out.println("Shortest path: " + randomMaze.getShortestPath());
+        randomMaze.window.pause(500); // long pause so click isn't registered multiple times
+      } else if (randomMaze.window.isKeyPressed(KeyEvent.VK_Q)) {
         break;
       } else {
-        randomMazeWindow.pause(100); // short pause so we don't hog the CPU
+        randomMaze.window.pause(100); // short pause so we don't hog the CPU
       }
     }
     
     // Mazes from files
-    String[] filenames = {}; // Don't load files
-    // String[] filenames = {"maze0.txt", "maze1.txt", "maze2.txt"};
+    // String[] filenames = {}; // Don't load files
+    String[] filenames = {"maze0.txt", "maze1.txt", "maze2.txt"};
     // Note: maze0 and maze1 are solvable, maze2 is not.
     for (String filename : filenames) {
       System.out.println("Loading: " + filename);
       SimpleMaze maze = new SimpleMaze(filename);
-      Draw mazeWindow = new Draw(filename + ": " + maze.getRows() + "x" + maze.getCols());
       // maze.print(); // uncomment to debug
       System.out.println("Solvable? " + maze.isSolvable());
-      maze.draw(mazeWindow);
+      maze.draw();
+      System.out.println("Shortest path: " + maze.getShortestPath());
     }
   } // main(args)
   
